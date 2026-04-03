@@ -21,7 +21,7 @@ Hand_Gesture_Control_System/
 │   ├── gesture_utils.py      ← shared helpers (landmark normalization, spread calc, overlay)
 │   ├── collect_data.py       ← record labeled gesture samples to CSV
 │   ├── train_model.py        ← train SVM classifier on collected data
-│   └── run_control.py        ← live inference, prints FORWARD / BACKWARD
+│   └── run_control.py        ← live inference, prints FORWARD / BACKWARD / STOP
 ├── data/
 │   ├── squeeze_in.csv        ← auto-generated when collecting
 │   └── squeeze_out.csv       ← auto-generated when collecting
@@ -86,7 +86,7 @@ Reads `data/squeeze_in.csv` and `data/squeeze_out.csv`, trains an SVM, and saves
 python src/run_control.py
 ```
 
-Opens the webcam, classifies each frame, and prints `FORWARD` or `BACKWARD` to the terminal whenever the gesture changes. Press `q` to quit.
+Opens the webcam, classifies each frame, and prints `FORWARD`, `BACKWARD`, or `STOP` to the terminal whenever the gesture changes. Press `q` to quit.
 
 ---
 
