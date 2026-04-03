@@ -22,22 +22,27 @@ from mediapipe.tasks.python.vision.hand_landmarker import (
 from mediapipe.tasks.python.vision.drawing_utils import draw_landmarks, DrawingSpec
 from mediapipe.tasks.python.vision.core.vision_task_running_mode import VisionTaskRunningMode
 from gesture_utils import normalize_landmarks
+from config import (
+    CLASSIFIER_PATH as MODEL_PATH,
+    LANDMARKER_PATH as _LANDMARKER_REL,
+    COMMANDS,
+    GESTURE_COLORS,
+    HINT_COLOR,
+    NUM_HANDS,
+    MIN_HAND_DETECTION_CONFIDENCE,
+    MIN_HAND_PRESENCE_CONFIDENCE,
+    MIN_TRACKING_CONFIDENCE,
+    CAMERA_INDEX,
+    MIRROR_MODE,
+    QUIT_KEY,
+    COMMAND_FONT,
+    COMMAND_FONT_SCALE,
+    COMMAND_THICKNESS,
+    COMMAND_MARGIN,
+    WINDOW_CONTROL,
+)
 
-MODEL_PATH = "model/gesture_classifier.pkl"
-LANDMARKER_PATH = os.path.join(os.path.dirname(__file__), "..", "model", "hand_landmarker.task")
-
-COMMANDS = {
-    "palm":  "FORWARD",
-    "fist":  "STOP",
-    "peace": "BACKWARD",
-}
-
-# BGR skeleton colors per gesture — matches gesture_utils.draw_overlay
-SKELETON_COLORS = {
-    "palm":  (0, 255, 0),    # green
-    "fist":  (0, 0, 255),    # red
-    "peace": (255, 0, 0),    # blue
-}
+LANDMARKER_PATH = os.path.join(os.path.dirname(__file__), "..", _LANDMARKER_REL)
 
 
 def load_model():
@@ -69,10 +74,10 @@ def build_landmarker() -> HandLandmarker:
     options = HandLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=path),
         running_mode=VisionTaskRunningMode.VIDEO,
-        num_hands=1,
-        min_hand_detection_confidence=0.5,
-        min_hand_presence_confidence=0.5,
-        min_tracking_confidence=0.5,
+        num_hands=NUM_HANDS,
+        min_hand_detection_confidence=MIN_HAND_DETECTION_CONFIDENCE,
+        min_hand_presence_confidence=MIN_HAND_PRESENCE_CONFIDENCE,
+        min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
     )
     return HandLandmarker.create_from_options(options)
 
@@ -114,10 +119,10 @@ def send_command(gesture: str) -> None:
 def main():
     model = load_model()
     landmarker = build_landmarker()
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
         raise ValueError("Failed to open camera")
-    cv2.namedWindow("Gesture Control")
+    cv2.namedWindow(WINDOW_CONTROL)
 
     prev_gesture = None
     while True:
@@ -125,13 +130,14 @@ def main():
         if not ret:
             print("Failed to read frame from camera")
             break
-        frame = cv2.flip(frame, 1)
+        if MIRROR_MODE:
+            frame = cv2.flip(frame, 1)
         timestamp_ms = time.time_ns() // 1_000_000
         landmarks, hand = detect_gesture(frame, landmarker, timestamp_ms)
 
         if landmarks is not None:
             gesture = classify_gesture(landmarks, model)
-            color = SKELETON_COLORS.get(gesture, (255, 255, 255))
+            color = GESTURE_COLORS.get(gesture, GESTURE_COLORS[""])
             spec = DrawingSpec(color=color)
             draw_landmarks(frame, hand, HandLandmarksConnections.HAND_CONNECTIONS,
                            landmark_drawing_spec=spec, connection_drawing_spec=spec)
@@ -139,17 +145,16 @@ def main():
                 send_command(gesture)
                 prev_gesture = gesture
             command = COMMANDS.get(gesture, "")
-            font, scale, thickness = cv2.FONT_HERSHEY_DUPLEX, 2.0, 5
-            (w, _), _ = cv2.getTextSize(command, font, scale, thickness)
-            cv2.putText(frame, command, (frame.shape[1] - w - 20, 70),
-                        font, scale, color, thickness)
+            (w, _), _ = cv2.getTextSize(command, COMMAND_FONT, COMMAND_FONT_SCALE, COMMAND_THICKNESS)
+            cv2.putText(frame, command, (frame.shape[1] - w - COMMAND_MARGIN, 70),
+                        COMMAND_FONT, COMMAND_FONT_SCALE, color, COMMAND_THICKNESS)
         else:
             prev_gesture = None
 
-        cv2.putText(frame, "q=quit", (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
-        cv2.imshow("Gesture Control", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        cv2.putText(frame, f"{QUIT_KEY}=quit", (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, HINT_COLOR, 2)
+        cv2.imshow(WINDOW_CONTROL, frame)
+        if cv2.waitKey(1) & 0xFF == ord(QUIT_KEY):
             break
 
     cap.release()

@@ -15,8 +15,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.model_selection import cross_val_score
 
-CSV_PATHS = ["data/fist.csv", "data/palm.csv", "data/peace.csv"]
-MODEL_PATH = "model/gesture_classifier.pkl"
+from config import CSV_PATHS, CLASSIFIER_PATH as MODEL_PATH, MODEL_DIR, CV_FOLDS, SVM_KERNEL
 
 
 def load_dataset() -> tuple[np.ndarray, np.ndarray]:
@@ -26,7 +25,7 @@ def load_dataset() -> tuple[np.ndarray, np.ndarray]:
     Returns X of shape (n_samples, 63) and y of shape (n_samples,).
     """
     X_rows, y_rows = [], []
-    for path in CSV_PATHS:
+    for path in CSV_PATHS.values():
         if not os.path.exists(path):
             print(f"Warning: {path} not found, skipping.")
             continue
@@ -58,9 +57,9 @@ def train_classifier(X: np.ndarray, y: np.ndarray) -> Pipeline:
     """
     pipeline = Pipeline([
         ("scaler", StandardScaler()),
-        ("svm", SVC(kernel="rbf")),
+        ("svm", SVC(kernel=SVM_KERNEL)),
     ])
-    scores = cross_val_score(pipeline, X, y, cv=5)
+    scores = cross_val_score(pipeline, X, y, cv=CV_FOLDS)
     print(f"Cross-validation accuracy: {scores.mean():.3f} ± {scores.std():.3f}")
     pipeline.fit(X, y)
     return pipeline
@@ -70,7 +69,7 @@ def save_model(model: Pipeline) -> None:
     """
     Save the trained model to model/gesture_classifier.pkl.
     """
-    os.makedirs("model", exist_ok=True)
+    os.makedirs(MODEL_DIR, exist_ok=True)
     joblib.dump(model, MODEL_PATH)
     print(f"Model saved to {MODEL_PATH}")
 
