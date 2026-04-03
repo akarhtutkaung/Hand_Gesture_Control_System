@@ -39,12 +39,12 @@ def draw_overlay(frame: np.ndarray, gesture: str) -> np.ndarray:
     Returns the annotated frame. OpenCV use BGR color format.
     """
     color = (255, 255, 255)  # default to white
-    if gesture == "open":
-        color = (0, 255, 0)  # green
-    elif gesture == "closed":
-        color = (255, 0, 0)  # blue
-    elif gesture == "stop":
-        color = (0, 0, 255)  # red
+    if gesture == "fist":
+        color = (0, 0, 255)  # red — STOP
+    elif gesture == "palm":
+        color = (0, 255, 0)  # green — FORWARD
+    elif gesture == "peace":
+        color = (255, 0, 0)  # blue — BACKWARD
 
     cv2.putText(frame, gesture, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
     return frame

@@ -2,8 +2,9 @@
 collect_data.py — record labeled hand-landmark samples to CSV.
 
 Controls:
-  i  →  save current frame as "squeeze_in"
-  o  →  save current frame as "squeeze_out"
+  f  →  save current frame as "fist"   (STOP)
+  p  →  save current frame as "palm"   (FORWARD)
+  v  →  save current frame as "peace"  (BACKWARD)
   q  →  quit
 
 Run:  python src/collect_data.py  (from the project root)
@@ -113,16 +114,19 @@ def main():
         timestamp_ms = time.time_ns() // 1_000_000
         landmarks = detect_landmarks(frame, landmarker, timestamp_ms)
         draw_overlay(frame, current_label)
-        cv2.putText(frame, "i=squeeze_in  o=squeeze_out  q=quit",
-                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 3)
+        cv2.putText(frame, "f=fist(stop)  p=palm(fwd)  v=peace(bwd)  q=quit",
+                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
         cv2.imshow("Hand Gesture Data Collection", frame)
         key = cv2.waitKey(1) & 0xFF
-        if key == ord('i') and landmarks is not None:
-            save_sample(landmarks, "squeeze_in")
-            current_label = "squeeze_in"
-        elif key == ord('o') and landmarks is not None:
-            save_sample(landmarks, "squeeze_out")
-            current_label = "squeeze_out"
+        if key == ord('f') and landmarks is not None:
+            save_sample(landmarks, "fist")
+            current_label = "fist"
+        elif key == ord('p') and landmarks is not None:
+            save_sample(landmarks, "palm")
+            current_label = "palm"
+        elif key == ord('v') and landmarks is not None:
+            save_sample(landmarks, "peace")
+            current_label = "peace"
         elif key == ord('q'):
             break
     cap.release()
