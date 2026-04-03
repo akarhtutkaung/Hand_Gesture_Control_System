@@ -1,70 +1,85 @@
 """
 train_model.py — load landmark CSVs, train an SVM classifier, save the model.
 
-Run:  python train_model.py
-      Requires data/squeeze_in.csv and data/squeeze_out.csv to exist.
+Run:  python src/train_model.py  (from the project root)
+      Requires data/fist.csv, data/palm.csv, and data/peace.csv to exist.
       Outputs model/gesture_classifier.pkl
 """
 
+import os
+
 import numpy as np
+import joblib
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
+from sklearn.model_selection import cross_val_score
+
+from config import CSV_PATHS, CLASSIFIER_PATH as MODEL_PATH, MODEL_DIR, CV_FOLDS, SVM_KERNEL
 
 
 def load_dataset() -> tuple[np.ndarray, np.ndarray]:
     """
-    Read data/squeeze_in.csv and data/squeeze_out.csv.
+    Read data/fist.csv, data/palm.csv, and data/peace.csv.
     Each row format: label, x0, y0, z0, ..., x20, y20, z20
     Returns X of shape (n_samples, 63) and y of shape (n_samples,).
     """
-    # TODO: loop over both CSV file paths
-    # TODO: skip any file that doesn't exist yet (warn the user)
-    # TODO: for each row, split the label (col 0) from the 63 feature values
-    # TODO: collect all features into X and all labels into y
-    # TODO: raise an error if no data was loaded
-    # TODO: return X as a float numpy array and y as a string array
-    pass
+    X_rows, y_rows = [], []
+    for path in CSV_PATHS.values():
+        if not os.path.exists(path):
+            print(f"Warning: {path} not found, skipping.")
+            continue
+        with open(path) as f:
+            for line in f:
+                parts = line.strip().split(",")
+                if len(parts) != 64:
+                    continue
+                y_rows.append(parts[0])
+                X_rows.append([float(v) for v in parts[1:]])
+    if not X_rows:
+        raise ValueError("No data loaded. Run collect_data.py first.")
+    return np.array(X_rows, dtype=float), np.array(y_rows, dtype=str)
 
 
 def preprocess(X: np.ndarray) -> np.ndarray:
     """
-    Any additional feature preprocessing before training.
-    Normalization is already applied in gesture_utils.normalize_landmarks,
-    so this can be a passthrough or add extra steps.
-    Returns the processed X array.
+    Passthrough — normalization is already applied by normalize_landmarks()
+    in gesture_utils.py at collection time.
     """
-    # TODO: apply any extra transformations if needed (e.g. feature selection)
-    # TODO: return X (can be a passthrough for now)
-    pass
+    return X
 
 
-def train_classifier(X: np.ndarray, y: np.ndarray):
+def train_classifier(X: np.ndarray, y: np.ndarray) -> Pipeline:
     """
     Train an SVM classifier with StandardScaler preprocessing.
     Prints cross-validation accuracy.
     Returns the fitted model (sklearn Pipeline).
     """
-    # TODO: create an sklearn Pipeline with StandardScaler + SVC(kernel="rbf")
-    # TODO: run cross_val_score with cv=5 and print the mean accuracy
-    # TODO: fit the pipeline on the full dataset
-    # TODO: return the fitted pipeline
-    pass
+    pipeline = Pipeline([
+        ("scaler", StandardScaler()),
+        ("svm", SVC(kernel=SVM_KERNEL, probability=True)),
+    ])
+    scores = cross_val_score(pipeline, X, y, cv=CV_FOLDS)
+    print(f"Cross-validation accuracy: {scores.mean():.3f} ± {scores.std():.3f}")
+    pipeline.fit(X, y)
+    return pipeline
 
 
-def save_model(model) -> None:
+def save_model(model: Pipeline) -> None:
     """
     Save the trained model to model/gesture_classifier.pkl.
     """
-    # TODO: create the model/ directory if it doesn't exist
-    # TODO: use joblib.dump to save the model to the .pkl path
-    # TODO: print a confirmation message
-    pass
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    joblib.dump(model, MODEL_PATH)
+    print(f"Model saved to {MODEL_PATH}")
 
 
 def main():
-    # TODO: call load_dataset() and print the sample count and class names
-    # TODO: call preprocess() on X
-    # TODO: call train_classifier() and print the result
-    # TODO: call save_model() to persist the model
-    pass
+    X, y = load_dataset()
+    print(f"Loaded {len(y)} samples — classes: {sorted(set(y))}")
+    X = preprocess(X)
+    model = train_classifier(X, y)
+    save_model(model)
 
 
 if __name__ == "__main__":
