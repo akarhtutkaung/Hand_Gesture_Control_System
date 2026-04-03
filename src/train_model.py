@@ -57,7 +57,7 @@ def train_classifier(X: np.ndarray, y: np.ndarray) -> Pipeline:
     """
     pipeline = Pipeline([
         ("scaler", StandardScaler()),
-        ("svm", SVC(kernel=SVM_KERNEL)),
+        ("svm", SVC(kernel=SVM_KERNEL, probability=True)),
     ])
     scores = cross_val_score(pipeline, X, y, cv=CV_FOLDS)
     print(f"Cross-validation accuracy: {scores.mean():.3f} ± {scores.std():.3f}")

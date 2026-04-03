@@ -40,6 +40,8 @@ from config import (
     COMMAND_THICKNESS,
     COMMAND_MARGIN,
     WINDOW_CONTROL,
+    DEBOUNCE_FRAMES,
+    MIN_CONFIDENCE,
 )
 
 LANDMARKER_PATH = os.path.join(os.path.dirname(__file__), "..", _LANDMARKER_REL)
@@ -98,12 +100,15 @@ def detect_gesture(frame: np.ndarray, landmarker: HandLandmarker, timestamp_ms: 
     return normalize_landmarks(coords), hand
 
 
-def classify_gesture(landmarks: np.ndarray, model) -> str:
+def classify_gesture(landmarks: np.ndarray, model) -> tuple[str, float]:
     """
     Run the trained classifier on a landmark array.
-    Returns the predicted label string: "fist", "palm", or "peace".
+    Returns (label, confidence) where confidence is the max predict_proba score.
     """
-    return model.predict(landmarks.reshape(1, -1))[0]
+    x = landmarks.reshape(1, -1)
+    proba = model.predict_proba(x)[0]
+    idx = int(np.argmax(proba))
+    return model.classes_[idx], float(proba[idx])
 
 
 def send_command(gesture: str) -> None:
@@ -125,6 +130,8 @@ def main():
     cv2.namedWindow(WINDOW_CONTROL)
 
     prev_gesture = None
+    pending_gesture = None
+    debounce_count = 0
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -136,19 +143,37 @@ def main():
         landmarks, hand = detect_gesture(frame, landmarker, timestamp_ms)
 
         if landmarks is not None:
-            gesture = classify_gesture(landmarks, model)
-            color = GESTURE_COLORS.get(gesture, GESTURE_COLORS[""])
+            raw_gesture, confidence = classify_gesture(landmarks, model)
+
+            # Confidence gate — ignore low-confidence predictions
+            gesture = raw_gesture if confidence >= MIN_CONFIDENCE else None
+
+            # Debounce — only commit a gesture after DEBOUNCE_FRAMES consecutive frames
+            if gesture == pending_gesture:
+                debounce_count += 1
+            else:
+                pending_gesture = gesture
+                debounce_count = 1
+
+            committed = pending_gesture if debounce_count >= DEBOUNCE_FRAMES else None
+
+            color = GESTURE_COLORS.get(committed or "", GESTURE_COLORS[""])
             spec = DrawingSpec(color=color)
             draw_landmarks(frame, hand, HandLandmarksConnections.HAND_CONNECTIONS,
                            landmark_drawing_spec=spec, connection_drawing_spec=spec)
-            if gesture != prev_gesture:
-                send_command(gesture)
-                prev_gesture = gesture
-            command = COMMANDS.get(gesture, "")
-            (w, _), _ = cv2.getTextSize(command, COMMAND_FONT, COMMAND_FONT_SCALE, COMMAND_THICKNESS)
-            cv2.putText(frame, command, (frame.shape[1] - w - COMMAND_MARGIN, 70),
-                        COMMAND_FONT, COMMAND_FONT_SCALE, color, COMMAND_THICKNESS)
+
+            if committed is not None and committed != prev_gesture:
+                send_command(committed)
+                prev_gesture = committed
+
+            command = COMMANDS.get(committed, "") if committed else ""
+            if command:
+                (w, _), _ = cv2.getTextSize(command, COMMAND_FONT, COMMAND_FONT_SCALE, COMMAND_THICKNESS)
+                cv2.putText(frame, command, (frame.shape[1] - w - COMMAND_MARGIN, 70),
+                            COMMAND_FONT, COMMAND_FONT_SCALE, color, COMMAND_THICKNESS)
         else:
+            pending_gesture = None
+            debounce_count = 0
             prev_gesture = None
 
         cv2.putText(frame, f"{QUIT_KEY}=quit", (10, 60),

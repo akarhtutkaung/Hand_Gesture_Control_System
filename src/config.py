@@ -108,3 +108,15 @@ WINDOW_CONTROL = "Gesture Control"
 
 CV_FOLDS = 5   # cross-validation folds
 SVM_KERNEL = "rbf"
+
+# ---------------------------------------------------------------------------
+# Inference guards (run_control.py)
+# ---------------------------------------------------------------------------
+
+# Debounce: number of consecutive frames a gesture must hold before a command fires.
+# Higher = more stable but slightly more latency. At ~30 fps, 5 frames ≈ 170 ms.
+DEBOUNCE_FRAMES = 5
+
+# Confidence threshold: minimum predict_proba score required to accept a prediction.
+# Range 0.0–1.0. Predictions below this are ignored (treated as no detection).
+MIN_CONFIDENCE = 0.85
