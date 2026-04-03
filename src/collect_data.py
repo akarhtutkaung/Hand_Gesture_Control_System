@@ -109,11 +109,12 @@ def main():
         if not ret:
             print("Failed to read frame from camera")
             break
+        frame = cv2.flip(frame, 1)
         timestamp_ms = time.time_ns() // 1_000_000
         landmarks = detect_landmarks(frame, landmarker, timestamp_ms)
         draw_overlay(frame, current_label)
         cv2.putText(frame, "i=squeeze_in  o=squeeze_out  q=quit",
-                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 3)
         cv2.imshow("Hand Gesture Data Collection", frame)
         key = cv2.waitKey(1) & 0xFF
         if key == ord('i') and landmarks is not None:
