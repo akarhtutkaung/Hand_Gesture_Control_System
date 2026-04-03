@@ -6,7 +6,7 @@ A real-time hand gesture detection system using a Mac webcam. Detects finger ges
 
 ## What It Uses
 
-- **MediaPipe Hands** — pre-trained 21-point hand landmark detection (no custom training for detection)
+- **MediaPipe HandLandmarker** — 21-point hand landmark detection via the Tasks API
 - **OpenCV** — webcam capture and frame display
 - **scikit-learn** — SVM classifier trained on recorded gesture samples
 - **NumPy** — landmark array manipulation
@@ -16,18 +16,20 @@ A real-time hand gesture detection system using a Mac webcam. Detects finger ges
 ## Project Structure
 
 ```
-Computer_Vision/
-├── gesture_utils.py      ← shared helpers (landmark normalization, spread calc, overlay)
-├── collect_data.py       ← record labeled gesture samples to CSV
-├── train_model.py        ← train SVM classifier on collected data
-├── run_control.py        ← live inference, prints FORWARD / BACKWARD
+Hand_Gesture_Control_System/
+├── src/
+│   ├── gesture_utils.py      ← shared helpers (landmark normalization, spread calc, overlay)
+│   ├── collect_data.py       ← record labeled gesture samples to CSV
+│   ├── train_model.py        ← train SVM classifier on collected data
+│   └── run_control.py        ← live inference, prints FORWARD / BACKWARD
 ├── data/
-│   ├── squeeze_in.csv    ← auto-generated when collecting
-│   └── squeeze_out.csv   ← auto-generated when collecting
+│   ├── squeeze_in.csv        ← auto-generated when collecting
+│   └── squeeze_out.csv       ← auto-generated when collecting
 ├── model/
+│   ├── hand_landmarker.task  ← download once (see Setup below)
 │   └── gesture_classifier.pkl  ← auto-generated after training
 ├── requirements.txt
-└── Plan.md               ← detailed function-level implementation guide
+└── Plan.md                   ← detailed function-level implementation guide
 ```
 
 ---
@@ -41,7 +43,12 @@ pip install -r requirements.txt
 mkdir -p data model
 ```
 
-> **Apple Silicon (M1/M2/M3)?** Use `pip install mediapipe-silicon` instead of `mediapipe`.
+Download the MediaPipe hand landmark model (required — one time only):
+
+```bash
+curl -L -o model/hand_landmarker.task \
+  https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+```
 
 macOS will prompt for camera permission on first run — click Allow.
 
@@ -49,10 +56,12 @@ macOS will prompt for camera permission on first run — click Allow.
 
 ## How to Run
 
+Run all commands from the project root.
+
 ### Step 1 — Collect gesture samples
 
 ```bash
-python collect_data.py
+python src/collect_data.py
 ```
 
 | Key | Action |
@@ -66,7 +75,7 @@ Aim for ~100 samples per gesture. Data saves automatically to `data/`.
 ### Step 2 — Train the classifier
 
 ```bash
-python train_model.py
+python src/train_model.py
 ```
 
 Reads `data/squeeze_in.csv` and `data/squeeze_out.csv`, trains an SVM, and saves the model to `model/gesture_classifier.pkl`. Prints cross-validation accuracy.
@@ -74,7 +83,7 @@ Reads `data/squeeze_in.csv` and `data/squeeze_out.csv`, trains an SVM, and saves
 ### Step 3 — Run live inference
 
 ```bash
-python run_control.py
+python src/run_control.py
 ```
 
 Opens the webcam, classifies each frame, and prints `FORWARD` or `BACKWARD` to the terminal whenever the gesture changes. Press `q` to quit.
@@ -83,7 +92,7 @@ Opens the webcam, classifies each frame, and prints `FORWARD` or `BACKWARD` to t
 
 ## Raspberry Pi Migration
 
-When the robot kit arrives, only one function needs to change: `send_command()` in `run_control.py`. Replace the `print()` calls with GPIO motor commands.
+When the robot kit arrives, only one function needs to change: `send_command()` in `src/run_control.py`. Replace the `print()` calls with GPIO motor commands.
 
 ```bash
 # On the Pi
