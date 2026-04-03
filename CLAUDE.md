@@ -20,21 +20,21 @@ mkdir -p data model
 ## Run Order
 
 ```bash
-python collect_data.py   # record ~100 samples per gesture (i=squeeze_in, o=squeeze_out, q=quit)
-python train_model.py    # train SVM → saves model/gesture_classifier.pkl
-python run_control.py    # live inference → prints FORWARD / BACKWARD
+python src/collect_data.py   # record ~100 samples per gesture (i=squeeze_in, o=squeeze_out, q=quit)
+python src/train_model.py    # train SVM → saves model/gesture_classifier.pkl
+python src/run_control.py    # live inference → prints FORWARD / BACKWARD
 ```
 
 ## Architecture
 
-All scripts share `gesture_utils.py` — implement its three helpers first, everything else depends on them.
+All scripts share `src/gesture_utils.py` — implement its three helpers first, everything else depends on them.
 
 | File | Role |
 |---|---|
-| `gesture_utils.py` | `calc_finger_spread`, `normalize_landmarks`, `draw_overlay` — imported by all other scripts |
-| `collect_data.py` | Opens webcam, runs MediaPipe, saves labeled rows to `data/squeeze_in.csv` / `data/squeeze_out.csv` |
-| `train_model.py` | Loads CSVs → trains sklearn SVM Pipeline → saves `model/gesture_classifier.pkl` |
-| `run_control.py` | Loads model, classifies live frames, calls `send_command()` on gesture change |
+| `src/gesture_utils.py` | `calc_finger_spread`, `normalize_landmarks`, `draw_overlay` — imported by all other scripts |
+| `src/collect_data.py` | Opens webcam, runs MediaPipe, saves labeled rows to `data/squeeze_in.csv` / `data/squeeze_out.csv` |
+| `src/train_model.py` | Loads CSVs → trains sklearn SVM Pipeline → saves `model/gesture_classifier.pkl` |
+| `src/run_control.py` | Loads model, classifies live frames, calls `send_command()` on gesture change |
 
 **Landmark format:** MediaPipe returns 21 hand landmarks. Each is stored as `(x, y, z)`, giving a flat array of shape `(63,)`. `normalize_landmarks()` in `gesture_utils.py` translates the wrist to origin and scales to `[-1, 1]` before any CSV write or model call.
 
