@@ -64,11 +64,12 @@ Run all commands from the project root.
 python src/collect_data.py
 ```
 
-| Key | Action |
-|-----|--------|
-| `i` | Save current frame as **squeeze in** |
-| `o` | Save current frame as **squeeze out** |
-| `q` | Quit |
+| Key | Gesture | How to make it | Command |
+|-----|---------|----------------|---------|
+| `f` | Fist | Close all fingers tightly into a fist | STOP |
+| `p` | Palm | Open hand flat, all fingers spread out | FORWARD |
+| `v` | Peace | Index and middle finger up, others folded | BACKWARD |
+| `q` | — | Quit the collector | — |
 
 Aim for ~100 samples per gesture. Data saves automatically to `data/`.
 
