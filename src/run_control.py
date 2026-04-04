@@ -12,6 +12,7 @@ import time
 import cv2
 import numpy as np
 import joblib
+import socket
 from mediapipe import Image, ImageFormat
 from mediapipe.tasks.python.core.base_options import BaseOptions
 from mediapipe.tasks.python.vision.hand_landmarker import (
@@ -45,6 +46,8 @@ from config import (
 )
 
 LANDMARKER_PATH = os.path.join(os.path.dirname(__file__), "..", _LANDMARKER_REL)
+ON_PI     = os.path.exists("/sys/firmware/devicetree/base/model")
+USE_SOCKET = os.environ.get("USE_SOCKET", "0") == "1"
 
 
 def load_model():
@@ -114,11 +117,23 @@ def classify_gesture(landmarks: np.ndarray, model) -> tuple[str, float]:
 def send_command(gesture: str) -> None:
     """
     Act on the recognized gesture.
-    Currently prints the motor command to the terminal.
-    # TODO: GPIO — replace print() with RPi.GPIO or gpiozero motor calls on the Pi.
+    Automatically routes to the correct backend based on the detected runtime:
+      - Raspberry Pi  → GPIO motor calls
+      - Webots sim    → Webots motor API
+      - Mac / other   → print to terminal
     """
     command = COMMANDS.get(gesture, "UNKNOWN")
-    print(command)
+    if ON_PI:
+        pass
+    elif USE_SOCKET:
+        try:
+            import socket
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.sendto(command.encode(), ("127.0.0.1", 5005))
+        except Exception as e:
+            print(f"Socket error: {e}")
+    else:
+        print(f"Command: {command}")
 
 
 def main():

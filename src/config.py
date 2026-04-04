@@ -6,13 +6,16 @@ Import from any script:
 """
 
 import cv2
+import os
 
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 
-LANDMARKER_PATH = "model/hand_landmarker.task"
-CLASSIFIER_PATH = "model/gesture_classifier.pkl"
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+CLASSIFIER_PATH  = os.path.normpath(os.path.join(_HERE, "..", "model", "gesture_classifier.pkl"))
+LANDMARKER_PATH  = os.path.normpath(os.path.join(_HERE, "..", "model", "hand_landmarker.task"))
 DATA_DIR = "data"
 MODEL_DIR = "model"
 
