@@ -4,8 +4,14 @@ run_control.py — live gesture inference, prints motor commands to terminal.
 Run:  python src/run_control.py  (from the project root)
       Requires model/gesture_classifier.pkl to exist (run train_model.py first).
       Press q to quit.
+
+Dual-hand control:
+  Left hand  — gesture-based: palm=FORWARD, fist=STOP, peace=BACKWARD
+  Right hand — steering: hold fist to activate, wrist X relative to activation
+               point maps to STEER:<angle> (negative=left, positive=right, 0=straight)
 """
 
+import math
 import os
 import time
 
@@ -35,6 +41,7 @@ from config import (
     MIN_TRACKING_CONFIDENCE,
     CAMERA_INDEX,
     MIRROR_MODE,
+    MIRROR_SWAP_HANDEDNESS,
     QUIT_KEY,
     COMMAND_FONT,
     COMMAND_FONT_SCALE,
@@ -43,10 +50,15 @@ from config import (
     WINDOW_CONTROL,
     DEBOUNCE_FRAMES,
     MIN_CONFIDENCE,
+    STEER_SCALE,
+    STEER_MAX_ANGLE,
+    STEER_DEADZONE,
+    SOCKET_HOST,
+    SOCKET_PORT,
 )
 
 LANDMARKER_PATH = os.path.join(os.path.dirname(__file__), "..", _LANDMARKER_REL)
-ON_PI     = os.path.exists("/sys/firmware/devicetree/base/model")
+ON_PI      = os.path.exists("/sys/firmware/devicetree/base/model")
 USE_SOCKET = os.environ.get("USE_SOCKET", "0") == "1"
 
 
@@ -87,20 +99,27 @@ def build_landmarker() -> HandLandmarker:
     return HandLandmarker.create_from_options(options)
 
 
-def detect_gesture(frame: np.ndarray, landmarker: HandLandmarker, timestamp_ms: int):
+def detect_all_hands(frame: np.ndarray, landmarker: HandLandmarker, timestamp_ms: int) -> dict:
     """
     Run the HandLandmarker on the current frame.
-    Returns (normalized coords (63,), raw hand landmarks) or (None, None) if no hand detected.
-    Drawing is deferred so the skeleton color can reflect the classified gesture.
+    Returns a dict keyed by corrected handedness label:
+        {"Left": (norm_landmarks (63,), raw_hand), "Right": (...)}
+    Only includes keys for hands that were detected.
+    When MIRROR_MODE and MIRROR_SWAP_HANDEDNESS are both True, Left↔Right labels
+    are swapped to match the user's actual hands (MediaPipe inverts handedness on
+    mirrored frames).
     """
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     mp_image = Image(image_format=ImageFormat.SRGB, data=rgb)
     result = landmarker.detect_for_video(mp_image, timestamp_ms)
-    if not result.hand_landmarks:
-        return None, None
-    hand = result.hand_landmarks[0]
-    coords = np.array([[lm.x, lm.y, lm.z] for lm in hand]).flatten()
-    return normalize_landmarks(coords), hand
+    hands = {}
+    for i, hand in enumerate(result.hand_landmarks):
+        label = result.handedness[i][0].category_name  # "Left" or "Right"
+        if MIRROR_MODE and MIRROR_SWAP_HANDEDNESS:
+            label = "Right" if label == "Left" else "Left"
+        coords = np.array([[lm.x, lm.y, lm.z] for lm in hand]).flatten()
+        hands[label] = (normalize_landmarks(coords), hand)
+    return hands
 
 
 def classify_gesture(landmarks: np.ndarray, model) -> tuple[str, float]:
@@ -114,26 +133,165 @@ def classify_gesture(landmarks: np.ndarray, model) -> tuple[str, float]:
     return model.classes_[idx], float(proba[idx])
 
 
+def calc_hand_angle(raw) -> float:
+    """
+    Compute the hand's orientation angle (degrees) in the image plane using
+    the vector from wrist (landmark 0) to middle-finger MCP (landmark 9).
+    Returns a value in [-180, 180].
+    """
+    wrist   = raw[0]
+    mid_mcp = raw[9]
+    return math.degrees(math.atan2(mid_mcp.y - wrist.y, mid_mcp.x - wrist.x))
+
+
+def calc_steer_angle(current_angle: float, origin_angle: float) -> float:
+    """
+    Compute steering angle (degrees) as the rotation of the hand relative to
+    its orientation when the fist was first committed.
+    Handles wrap-around at ±180°. Clamped to ±STEER_MAX_ANGLE.
+    Negative = left, positive = right.
+    """
+    delta = current_angle - origin_angle
+    # Normalise to [-180, 180] to handle wrap-around
+    delta = (delta + 180) % 360 - 180
+    return max(-STEER_MAX_ANGLE, min(STEER_MAX_ANGLE, delta * STEER_SCALE))
+
+
 def send_command(gesture: str) -> None:
     """
-    Act on the recognized gesture.
-    Automatically routes to the correct backend based on the detected runtime:
-      - Raspberry Pi  → GPIO motor calls
-      - Webots sim    → Webots motor API
-      - Mac / other   → print to terminal
+    Act on a recognized left-hand gesture.
+    Routes to the correct backend based on the detected runtime.
     """
     command = COMMANDS.get(gesture, "UNKNOWN")
     if ON_PI:
-        pass
+        pass  # TODO: GPIO motor calls
     elif USE_SOCKET:
         try:
-            import socket
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.sendto(command.encode(), ("127.0.0.1", 5005))
+                s.sendto(command.encode(), (SOCKET_HOST, SOCKET_PORT))
         except Exception as e:
             print(f"Socket error: {e}")
     else:
         print(f"Command: {command}")
+
+
+def send_steer(angle: float) -> None:
+    """
+    Send a continuous steering angle command formatted as 'STEER:<angle>'.
+    Negative = left, positive = right, 0 = straight.
+    """
+    command = f"STEER:{angle:.1f}"
+    if ON_PI:
+        pass  # TODO: map angle to GPIO PWM / servo
+    elif USE_SOCKET:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.sendto(command.encode(), (SOCKET_HOST, SOCKET_PORT))
+        except Exception as e:
+            print(f"Socket error: {e}")
+    else:
+        print(f"Command: {command}")
+
+
+def make_left_state() -> dict:
+    return {"pending": None, "debounce": 0, "prev": None}
+
+
+def make_right_state() -> dict:
+    return {"fist_frames": 0, "active": False, "origin_angle": None, "prev_angle": None}
+
+
+def process_left_hand(frame: np.ndarray, hand_data: tuple, model, state: dict) -> None:
+    """
+    Classify the left-hand gesture, apply debounce + confidence gate,
+    draw the skeleton, and fire send_command() on gesture change.
+    Mutates state in-place.
+    """
+    lm, raw = hand_data
+    raw_g, conf = classify_gesture(lm, model)
+    gesture = raw_g if conf >= MIN_CONFIDENCE else None
+
+    if gesture == state["pending"]:
+        state["debounce"] += 1
+    else:
+        state["pending"] = gesture
+        state["debounce"] = 1
+
+    committed = state["pending"] if state["debounce"] >= DEBOUNCE_FRAMES else None
+
+    color = GESTURE_COLORS.get(committed or "", GESTURE_COLORS[""])
+    spec = DrawingSpec(color=color)
+    draw_landmarks(frame, raw, HandLandmarksConnections.HAND_CONNECTIONS,
+                   landmark_drawing_spec=spec, connection_drawing_spec=spec)
+
+    if committed is not None and committed != state["prev"]:
+        send_command(committed)
+        state["prev"] = committed
+
+    cmd = COMMANDS.get(committed, "") if committed else ""
+    if cmd:
+        (w, _), _ = cv2.getTextSize(cmd, COMMAND_FONT, COMMAND_FONT_SCALE, COMMAND_THICKNESS)
+        cv2.putText(frame, cmd,
+                    (frame.shape[1] - w - COMMAND_MARGIN, 70),
+                    COMMAND_FONT, COMMAND_FONT_SCALE, color, COMMAND_THICKNESS)
+
+
+def reset_left_hand(state: dict) -> None:
+    if state["prev"] is not None:
+        send_command("fist")  # fist → STOP; only fires if a command was previously active
+    state["pending"] = None
+    state["debounce"] = 0
+    state["prev"] = None
+
+
+def process_right_hand(frame: np.ndarray, hand_data: tuple, model, state: dict) -> None:
+    """
+    Detect a right-hand fist to activate steering, then measure how much the
+    hand has rotated (wrist→middle-MCP arc angle) relative to the activation
+    pose and fire send_steer() on change.
+    Mutates state in-place.
+    """
+    lm, raw = hand_data
+    raw_g, conf = classify_gesture(lm, model)
+    is_fist = (raw_g == "fist" and conf >= MIN_CONFIDENCE)
+
+    if is_fist:
+        state["fist_frames"] = min(state["fist_frames"] + 1, DEBOUNCE_FRAMES)
+    else:
+        state["fist_frames"] = 0
+        if state["active"]:
+            send_steer(0.0)
+        state["active"] = False
+        state["origin_angle"] = None
+        state["prev_angle"]   = None
+
+    if state["fist_frames"] >= DEBOUNCE_FRAMES and not state["active"]:
+        state["active"]       = True
+        state["origin_angle"] = calc_hand_angle(raw)
+
+    skel_color = GESTURE_COLORS["steering"] if state["active"] else GESTURE_COLORS[""]
+    spec = DrawingSpec(color=skel_color)
+    draw_landmarks(frame, raw, HandLandmarksConnections.HAND_CONNECTIONS,
+                   landmark_drawing_spec=spec, connection_drawing_spec=spec)
+
+    if state["active"]:
+        angle = calc_steer_angle(calc_hand_angle(raw), state["origin_angle"])
+        if state["prev_angle"] is None or abs(angle - state["prev_angle"]) >= STEER_DEADZONE:
+            send_steer(angle)
+            state["prev_angle"] = angle
+
+        cv2.putText(frame, f"STEER {angle:+.0f}deg", (10, 90),
+                    COMMAND_FONT, COMMAND_FONT_SCALE * 0.7,
+                    GESTURE_COLORS["steering"], COMMAND_THICKNESS - 1)
+
+
+def reset_right_hand(state: dict) -> None:
+    if state["active"]:
+        send_steer(0.0)
+    state["fist_frames"]  = 0
+    state["active"]       = False
+    state["origin_angle"] = None
+    state["prev_angle"]   = None
 
 
 def main():
@@ -144,9 +302,9 @@ def main():
         raise ValueError("Failed to open camera")
     cv2.namedWindow(WINDOW_CONTROL)
 
-    prev_gesture = None
-    pending_gesture = None
-    debounce_count = 0
+    left_state  = make_left_state()
+    right_state = make_right_state()
+
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -155,41 +313,17 @@ def main():
         if MIRROR_MODE:
             frame = cv2.flip(frame, 1)
         timestamp_ms = time.time_ns() // 1_000_000
-        landmarks, hand = detect_gesture(frame, landmarker, timestamp_ms)
+        hands = detect_all_hands(frame, landmarker, timestamp_ms)
 
-        if landmarks is not None:
-            raw_gesture, confidence = classify_gesture(landmarks, model)
-
-            # Confidence gate — ignore low-confidence predictions
-            gesture = raw_gesture if confidence >= MIN_CONFIDENCE else None
-
-            # Debounce — only commit a gesture after DEBOUNCE_FRAMES consecutive frames
-            if gesture == pending_gesture:
-                debounce_count += 1
-            else:
-                pending_gesture = gesture
-                debounce_count = 1
-
-            committed = pending_gesture if debounce_count >= DEBOUNCE_FRAMES else None
-
-            color = GESTURE_COLORS.get(committed or "", GESTURE_COLORS[""])
-            spec = DrawingSpec(color=color)
-            draw_landmarks(frame, hand, HandLandmarksConnections.HAND_CONNECTIONS,
-                           landmark_drawing_spec=spec, connection_drawing_spec=spec)
-
-            if committed is not None and committed != prev_gesture:
-                send_command(committed)
-                prev_gesture = committed
-
-            command = COMMANDS.get(committed, "") if committed else ""
-            if command:
-                (w, _), _ = cv2.getTextSize(command, COMMAND_FONT, COMMAND_FONT_SCALE, COMMAND_THICKNESS)
-                cv2.putText(frame, command, (frame.shape[1] - w - COMMAND_MARGIN, 70),
-                            COMMAND_FONT, COMMAND_FONT_SCALE, color, COMMAND_THICKNESS)
+        if "Left" in hands:
+            process_left_hand(frame, hands["Left"], model, left_state)
         else:
-            pending_gesture = None
-            debounce_count = 0
-            prev_gesture = None
+            reset_left_hand(left_state)
+
+        if "Right" in hands:
+            process_right_hand(frame, hands["Right"], model, right_state)
+        else:
+            reset_right_hand(right_state)
 
         cv2.putText(frame, f"{QUIT_KEY}=quit", (10, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, HINT_COLOR, 2)

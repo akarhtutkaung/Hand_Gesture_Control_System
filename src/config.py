@@ -45,10 +45,11 @@ COMMANDS = {
 
 # Per-gesture overlay / skeleton color
 GESTURE_COLORS = {
-    "palm":  (0, 255, 0),    # green  — FORWARD
-    "fist":  (0, 0, 255),    # red    — STOP
-    "peace": (255, 0, 0),    # blue   — BACKWARD
-    "":      (255, 255, 255), # white  — no gesture / default
+    "palm":     (0, 255, 0),    # green  — FORWARD
+    "fist":     (0, 0, 255),    # red    — STOP
+    "peace":    (255, 0, 0),    # blue   — BACKWARD
+    "steering": (0, 255, 255),  # yellow — steering mode active (right hand)
+    "":         (255, 255, 255), # white  — no gesture / default
 }
 
 # UI hint text color (key legend, etc.)
@@ -74,10 +75,14 @@ COMMAND_MARGIN     = 20         # pixels from the right edge
 # MediaPipe hand landmarker settings
 # ---------------------------------------------------------------------------
 
-NUM_HANDS                    = 1
+NUM_HANDS                    = 2
 MIN_HAND_DETECTION_CONFIDENCE = 0.5
 MIN_HAND_PRESENCE_CONFIDENCE  = 0.5
 MIN_TRACKING_CONFIDENCE       = 0.5
+
+# When MIRROR_MODE is True, MediaPipe sees a flipped image and reports handedness
+# inverted relative to the user's actual hands. Set True to correct this.
+MIRROR_SWAP_HANDEDNESS = True
 
 # ---------------------------------------------------------------------------
 # Camera
@@ -85,6 +90,13 @@ MIN_TRACKING_CONFIDENCE       = 0.5
 
 CAMERA_INDEX = 0       # default webcam
 MIRROR_MODE  = True    # flip frame horizontally (mirror view)
+
+# ---------------------------------------------------------------------------
+# UDP socket (USE_SOCKET=1 mode)
+# ---------------------------------------------------------------------------
+
+SOCKET_HOST = "127.0.0.1"
+SOCKET_PORT = 5005
 
 # ---------------------------------------------------------------------------
 # collect_data.py key bindings  {key_char: gesture_label}
@@ -123,3 +135,18 @@ DEBOUNCE_FRAMES = 5
 # Confidence threshold: minimum predict_proba score required to accept a prediction.
 # Range 0.0–1.0. Predictions below this are ignored (treated as no detection).
 MIN_CONFIDENCE = 0.85
+
+# ---------------------------------------------------------------------------
+# Steering (right hand, run_control.py)
+# ---------------------------------------------------------------------------
+
+# Sensitivity multiplier on the hand rotation delta (already in degrees).
+# 1.0 = 1:1 mapping; increase for more sensitive steering.
+STEER_SCALE     = 0.5
+
+# Maximum steering angle in either direction (degrees).
+STEER_MAX_ANGLE = 45.0
+
+# Minimum angle change (degrees) required to re-send a steering command.
+# Filters out jitter without adding latency.
+STEER_DEADZONE  = 2.0
