@@ -3,6 +3,14 @@
 A real-time hand gesture detection system using a Mac webcam. Detects finger gestures and prints motor commands to the terminal. Built to later transfer to a Raspberry Pi to control a physical robot car via GPIO.
 
 ---
+## Supported Gestures
+| Hand | Gesture | How to make it | Command |
+|-----|---------|----------------|---------|
+| Left | Fist | Close all fingers tightly into a fist | STOP |
+| Left | Palm | Open hand flat, all fingers spread out | FORWARD |
+| Left | Peace | Index and middle finger up, others folded | BACKWARD |
+| Right | Hold Fist | Close all fingers tightly into a fist and hold, then direct angles to left or right | Change direction |
+---
 
 ## What It Uses
 
