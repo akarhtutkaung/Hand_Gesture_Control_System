@@ -6,9 +6,9 @@
 
 ```
 ┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
-│   collect_data.py   │     │   train_model.py     │     │   run_control.py    │
-│                     │     │                      │     │                     │
-│  Webcam → CSV       │────▶│  CSV → .pkl model    │────▶│  Webcam → Command   │
+│   collect_data.py   │     │   train_model.py    │     │   run_control.py    │
+│                     │     │                     │     │                     │
+│  Webcam → CSV       │────▶│  CSV → .pkl model   │────▶│  Webcam → Command   │
 └─────────────────────┘     └─────────────────────┘     └─────────────────────┘
        Phase 1                      Phase 2                      Phase 3
    (run once to collect)       (run once to train)          (run live)
@@ -22,37 +22,39 @@
 main()
  │
  ├── open_camera()
- │     └── cv2.VideoCapture(0)
+ │     └── cv2.VideoCapture(CAMERA_INDEX)
  │
- ├── mp.solutions.hands.Hands(...)          ← MediaPipe init
+ ├── build_landmarker()
+ │     └── HandLandmarker (VIDEO mode, num_hands=2)
  │
  └── [webcam loop]
        │
-       ├── cap.read()                       ← grab frame
+       ├── cap.read()                          ← grab frame
+       ├── cv2.flip()                          ← mirror if MIRROR_MODE
        │
-       ├── detect_landmarks(frame, hands)
+       ├── detect_landmarks(frame, landmarker, timestamp_ms)
        │     ├── cv2.cvtColor BGR→RGB
-       │     ├── hands.process(rgb)         ← MediaPipe inference
-       │     ├── mp_draw.draw_landmarks()   ← draw skeleton on frame
-       │     └── normalize_landmarks()      ← gesture_utils.py
-       │           ├── reshape (63,) → (21,3)
+       │     ├── landmarker.detect_for_video() ← MediaPipe Tasks inference
+       │     ├── draw_landmarks()              ← draw skeleton on frame
+       │     └── normalize_landmarks()         ← gesture_utils.py
+       │           ├── reshape (63,) → (21, 3)
        │           ├── subtract wrist (origin)
        │           └── scale to [-1, 1]
        │
-       ├── draw_overlay(frame, gesture)     ← gesture_utils.py
-       │
+       ├── draw_overlay(frame, label)          ← gesture_utils.py
        ├── cv2.imshow()
        │
-       └── [keypress handler]
-             ├── i → save_sample(landmarks, "squeeze_in")
-             ├── o → save_sample(landmarks, "squeeze_out")
+       └── [keypress handler]                  ← COLLECT_KEYS in config.py
+             ├── f → save_sample(landmarks, "fist")
+             ├── p → save_sample(landmarks, "palm")
+             ├── v → save_sample(landmarks, "peace")
              └── q → break
                    │
                    └── save_sample()
                          └── append row to data/{label}.csv
 ```
 
-**Output:** `data/squeeze_in.csv`, `data/squeeze_out.csv`
+**Output:** `data/fist.csv`, `data/palm.csv`, `data/peace.csv`
 
 ---
 
@@ -62,19 +64,20 @@ main()
 main()
  │
  ├── load_dataset()
- │     ├── read data/squeeze_in.csv
- │     ├── read data/squeeze_out.csv
+ │     ├── read data/fist.csv
+ │     ├── read data/palm.csv
+ │     ├── read data/peace.csv
  │     └── return X (n, 63), y (n,)
  │
  ├── preprocess(X)
- │     └── return X  (passthrough for now)
+ │     └── passthrough — normalization already applied at collection time
  │
  ├── train_classifier(X, y)
- │     ├── build Pipeline: StandardScaler → SVC(rbf)
+ │     ├── build Pipeline: StandardScaler → SVC(kernel=rbf, probability=True)
  │     ├── cross_val_score(cv=5) → print accuracy
- │     └── model.fit(X, y)
+ │     └── pipeline.fit(X, y)
  │
- └── save_model(model)
+ └── save_model(pipeline)
        └── joblib.dump → model/gesture_classifier.pkl
 ```
 
@@ -87,36 +90,92 @@ main()
 ```
 main()
  │
- ├── load_model()
- │     └── joblib.load("model/gesture_classifier.pkl")
+ ├── load_model()             → gesture_classifier.pkl
+ ├── build_landmarker()       → HandLandmarker (VIDEO mode, num_hands=2)
+ ├── cv2.VideoCapture(CAMERA_INDEX)
  │
- ├── cv2.VideoCapture(0)
- ├── mp.solutions.hands.Hands(...)
+ ├── make_left_state()        → {pending, debounce, prev}
+ ├── make_right_state()       → {fist_frames, active, origin_angle, prev_angle}
  │
  └── [webcam loop]
        │
-       ├── cap.read()                       ← grab frame
+       ├── cap.read() + flip
        │
-       ├── detect_gesture(frame, hands)
-       │     ├── cv2.cvtColor BGR→RGB
-       │     ├── hands.process(rgb)         ← MediaPipe inference
-       │     ├── mp_draw.draw_landmarks()
-       │     └── normalize_landmarks()      ← gesture_utils.py
+       ├── detect_all_hands(frame, landmarker, timestamp_ms)
+       │     ├── landmarker.detect_for_video()
+       │     ├── correct handedness (MIRROR_SWAP_HANDEDNESS)
+       │     └── returns {"Left": (norm_lm, raw), "Right": (...)}
        │
-       ├── classify_gesture(landmarks, model)
-       │     ├── landmarks.reshape(1, 63)
-       │     └── model.predict()            ← SVM inference
-       │           └── returns "squeeze_in" or "squeeze_out"
+       ├── [Left hand present?]
+       │     ├── YES → process_left_hand()
+       │     │           ├── classify_gesture()        ← SVM predict_proba
+       │     │           ├── confidence gate           ← MIN_CONFIDENCE (0.85)
+       │     │           ├── debounce                  ← DEBOUNCE_FRAMES (5)
+       │     │           ├── draw skeleton (color by gesture)
+       │     │           └── send_command() on gesture change
+       │     │                 ├── palm  → "FORWARD"
+       │     │                 ├── fist  → "STOP"
+       │     │                 └── peace → "BACKWARD"
+       │     │
+       │     └── NO  → reset_left_hand() → send_command("fist") → "STOP"
        │
-       ├── [gesture changed?]
-       │     └── send_command(gesture)
-       │           ├── "squeeze_in"  → print("FORWARD")
-       │           └── "squeeze_out" → print("BACKWARD")
-       │                               # TODO: GPIO motor calls here
-       │
-       ├── draw_overlay(frame, gesture)     ← gesture_utils.py
-       ├── cv2.imshow()
-       └── q → break
+       └── [Right hand present?]
+             ├── YES → process_right_hand()
+             │           ├── classify_gesture()        ← SVM predict_proba
+             │           ├── [Stage 1 — activation]
+             │           │     └── hold fist ≥ DEBOUNCE_FRAMES → capture origin_angle
+             │           ├── [Stage 2 — continuous steering]
+             │           │     ├── calc_hand_angle()   ← atan2(wrist→mid-MCP)
+             │           │     ├── calc_steer_angle()  ← delta × STEER_SCALE, clamped
+             │           │     └── send_steer(angle)   ← "STEER:<degrees>"
+             │           └── draw skeleton (yellow = steering active)
+             │
+             └── NO  → reset_right_hand() → send_steer(0.0)
+```
+
+---
+
+## `send_command()` / `send_steer()` — Runtime Routing
+
+```
+send_command(gesture) / send_steer(angle)
+ │
+ ├── ON_PI?     (/sys/firmware/devicetree/base/model exists)
+ │     └── TODO: GPIO motor calls
+ │
+ ├── USE_SOCKET=1?  (environment variable)
+ │     └── UDP → SOCKET_HOST:SOCKET_PORT (127.0.0.1:5005)
+ │                          │
+ │                          ▼
+ │               gesture_controller.py  (Webots)
+ │                 listens on port 5005, drives robot motors
+ │
+ └── fallback (Mac / other)
+       └── print(f"Command: {command}")
+```
+
+---
+
+## Webots Controller — `gesture_controller.py`
+
+```
+[Webots simulation loop]
+ │
+ ├── sock.recvfrom()          ← drain all UDP packets each timestep
+ │     ├── "FORWARD"          → drive_speed = +MAX_SPEED
+ │     ├── "BACKWARD"         → drive_speed = -MAX_SPEED
+ │     ├── "STOP"             → drive_speed = 0.0
+ │     └── "STEER:<degrees>"  → steer_angle = float(degrees)
+ │
+ ├── ramp current_speed → drive_speed  (by DECEL_RATE per step)
+ ├── ramp current_steer → steer_angle  (by STEER_RATE per step)
+ │
+ ├── steer_factor = current_steer / STEER_MAX_ANGLE   ∈ [-1, 1]
+ ├── left_v  = current_speed × (1 + steer_factor)
+ ├── right_v = current_speed × (1 − steer_factor)
+ ├── clamp both to ±MAX_SPEED
+ │
+ └── motor.setVelocity(left_v / right_v)
 ```
 
 ---
@@ -126,17 +185,15 @@ main()
 ```
 gesture_utils.py
        │
-       ├── normalize_landmarks()
-       │     called by: detect_landmarks()  [collect_data.py]
-       │                detect_gesture()    [run_control.py]
+       ├── normalize_landmarks(landmarks: ndarray) → ndarray (63,)
+       │     called by: detect_landmarks()   [collect_data.py]
+       │                detect_all_hands()   [run_control.py]
        │
-       ├── calc_finger_spread()
-       │     optional — can be used for rule-based detection
-       │     instead of the SVM classifier
+       ├── calc_finger_spread(landmarks) → float
+       │     optional — rule-based spread metric (not used by SVM pipeline)
        │
-       └── draw_overlay()
+       └── draw_overlay(frame, gesture)
              called by: main()  [collect_data.py]
-                        main()  [run_control.py]
 ```
 
 ---
@@ -147,24 +204,30 @@ gesture_utils.py
 Webcam frame
      │
      ▼
-MediaPipe Hands
+MediaPipe HandLandmarker (Tasks API, VIDEO mode)
      │
      ▼
-21 landmark points (x, y, z)  ──────────────── shape: (21, 3)
+21 landmark points (x, y, z) per hand  ─────────────── shape: (21, 3)
      │
      ▼
 normalize_landmarks()
+  ├── translate wrist to origin
+  └── scale to [-1, 1]
      │
      ▼
-flat normalized array  ─────────────────────── shape: (63,)
+flat normalized array  ──────────────────────────────── shape: (63,)
      │
-     ├──[collect phase]──▶  save to CSV  ──▶  train SVM  ──▶  .pkl
+     ├──[collect phase]──▶  data/{label}.csv  ──▶  SVM Pipeline  ──▶  .pkl
      │
-     └──[inference phase]─▶  model.predict()  ──▶  label  ──▶  send_command()
-                                                                      │
-                                                               print FORWARD
-                                                               print BACKWARD
-                                                               (or GPIO later)
+     └──[inference phase]
+           │
+           ├── LEFT HAND  → SVM predict_proba → debounce → send_command()
+           │                                                      │
+           │                                              "FORWARD" / "STOP" / "BACKWARD"
+           │
+           └── RIGHT HAND → SVM (fist gate) → atan2 angle delta → send_steer()
+                                                                         │
+                                                                 "STEER:<degrees>"
 ```
 
 ---
@@ -189,4 +252,5 @@ flat normalized array  ───────────────────
         1───────0  (wrist)
 ```
 
-Fingertip indices used by `calc_finger_spread`: `[4, 8, 12, 16, 20]`
+Fingertip indices: `[4, 8, 12, 16, 20]`  
+Steering vector: wrist `(0)` → middle-finger MCP `(9)`
