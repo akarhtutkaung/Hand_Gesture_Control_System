@@ -28,7 +28,6 @@ Controls — right hand (steering):
 Command format over UDP:
   Movement : "FORWARD" | "STOP" | "BACKWARD"
   Steering : "STEER:<degrees>"  e.g. "STEER:-30.0"
-  (host/port configured via SOCKET_HOST / SOCKET_PORT in src/config.py)
 """
 
 import sys
@@ -42,9 +41,10 @@ except ModuleNotFoundError:
     from controller import Robot
 
 # ── constants ─────────────────────────────────────────────────────────────────
-MAX_SPEED       = 3.0   # rad/s — match e-puck's rated speed
+MAX_SPEED       = 6.0   # rad/s — e-puck rated max speed
 STEER_MAX_ANGLE = 45.0  # degrees — must match config.py STEER_MAX_ANGLE
-DECEL_RATE      = 0.05  # velocity step per timestep toward target speed (tune to taste)
+DECEL_RATE      = 0.2   # speed ramp per timestep — lower = smoother acceleration
+STEER_RATE      = 2.0   # steering ramp per timestep — higher = snappier turning
 
 # ── robot setup ───────────────────────────────────────────────────────────────
 robot    = Robot()
@@ -61,49 +61,70 @@ print("=== E-puck ready ===")
 
 # ── socket setup ──────────────────────────────────────────────────────────────
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.bind(("127.0.0.1", 5005))  # keep in sync with SOCKET_HOST / SOCKET_PORT in config.py
+sock.bind(("127.0.0.1", 5005))
 sock.setblocking(False)
 
 print("Listening for gesture commands on port 5005...")
 
 # ── state ─────────────────────────────────────────────────────────────────────
-drive_speed   = 0.0   # target speed set by FORWARD / STOP / BACKWARD
-current_speed = 0.0   # actual applied speed — ramps toward drive_speed each timestep
-steer_angle   = 0.0   # set by STEER:<degrees>
+drive_speed    = 0.0   # target speed from gesture command
+current_speed  = 0.0   # actual applied speed — ramps toward drive_speed
+steer_angle    = 0.0   # target steering angle from STEER command
+current_steer  = 0.0   # actual applied steering — ramps toward steer_angle
+last_direction = None  # for change-only printing
+last_steer_log = None  # for change-only printing
 
 # ── main loop ─────────────────────────────────────────────────────────────────
 while robot.step(timestep) != -1:
-    # drain all pending packets; keep only the most recent per channel
+
+    # drain all pending packets — keep only the most recent per channel
+    latest_move  = None
+    latest_steer = None
+
     try:
         while True:
             data, _ = sock.recvfrom(1024)
             command = data.decode().strip()
-            print(f"Received: {command}")
-
-            if command == "FORWARD":
-                drive_speed = MAX_SPEED
-            elif command == "BACKWARD":
-                drive_speed = -MAX_SPEED
-            elif command == "STOP":
-                drive_speed = 0.0
+            if command in ("FORWARD", "BACKWARD", "STOP"):
+                latest_move = command
             elif command.startswith("STEER:"):
-                try:
-                    steer_angle = float(command.split(":")[1])
-                except ValueError:
-                    pass
+                latest_steer = command
     except BlockingIOError:
-        pass  # no new packets this timestep — keep current state
+        pass  # no more packets this timestep
+
+    # apply latest movement command
+    if latest_move == "FORWARD":
+        drive_speed = MAX_SPEED
+    elif latest_move == "BACKWARD":
+        drive_speed = -MAX_SPEED
+    elif latest_move == "STOP":
+        drive_speed = 0.0
+
+    # apply latest steering command
+    if latest_steer:
+        try:
+            steer_angle = float(latest_steer.split(":")[1])
+        except ValueError:
+            pass
 
     # ramp current_speed toward drive_speed
-    diff = drive_speed - current_speed
-    if abs(diff) <= DECEL_RATE:
+    speed_diff = drive_speed - current_speed
+    if abs(speed_diff) <= DECEL_RATE:
         current_speed = drive_speed
     else:
-        current_speed += DECEL_RATE * (1.0 if diff > 0 else -1.0)
+        current_speed += DECEL_RATE * (1.0 if speed_diff > 0 else -1.0)
 
-    # combine drive + steer into per-wheel velocities
-    # steer_factor in [-1, 1]: positive = right turn (left wheel faster)
-    steer_factor = steer_angle / STEER_MAX_ANGLE
+    # ramp current_steer toward steer_angle
+    steer_diff = steer_angle - current_steer
+    if abs(steer_diff) <= STEER_RATE:
+        current_steer = steer_angle
+    else:
+        current_steer += STEER_RATE * (1.0 if steer_diff > 0 else -1.0)
+
+    # combine speed + steering into per-wheel velocities
+    # steer_factor > 0 = turn right (left wheel faster than right)
+    # steer_factor < 0 = turn left  (right wheel faster than left)
+    steer_factor = current_steer / STEER_MAX_ANGLE
     left_v  = current_speed * (1.0 + steer_factor)
     right_v = current_speed * (1.0 - steer_factor)
 
@@ -114,7 +135,16 @@ while robot.step(timestep) != -1:
     left_motor.setVelocity(left_v)
     right_motor.setVelocity(right_v)
 
-    direction = "FORWARD" if current_speed > 0.01 else "BACKWARD" if current_speed < -0.01 else "STOPPED"
-    print(f"[{direction}] speed={current_speed:+.2f} rad/s  left={left_v:+.2f}  right={right_v:+.2f}  steer={steer_angle:+.1f}deg")
+    # only print when something meaningfully changes
+    direction = (
+        "FORWARD"  if current_speed >  0.01 else
+        "BACKWARD" if current_speed < -0.01 else
+        "STOPPED"
+    )
+    steer_changed = last_steer_log is None or abs(current_steer - last_steer_log) > 1.0
+    if direction != last_direction or steer_changed:
+        print(f"[{direction}] speed={current_speed:+.2f} rad/s  steer={current_steer:+.1f}deg  L={left_v:+.2f}  R={right_v:+.2f}")
+        last_direction = direction
+        last_steer_log = current_steer
 
 sock.close()
