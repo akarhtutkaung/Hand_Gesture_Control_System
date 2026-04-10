@@ -16,7 +16,11 @@ Requires model/hand_landmarker.task — download once with:
 """
 
 import os
+import sys
 import time
+
+# Allow running directly: python src/controller/collect_data.py
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import cv2
 import numpy as np
@@ -29,7 +33,8 @@ from mediapipe.tasks.python.vision.hand_landmarker import (
 )
 from mediapipe.tasks.python.vision.drawing_utils import draw_landmarks
 from mediapipe.tasks.python.vision.core.vision_task_running_mode import VisionTaskRunningMode
-from gesture_utils import normalize_landmarks, draw_overlay
+from controller.gesture_classifier import normalize_landmarks
+from controller.hand_processors import draw_overlay
 from config import (
     LANDMARKER_PATH,
     DATA_DIR,
@@ -46,7 +51,6 @@ from config import (
 )
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", LANDMARKER_PATH)
-
 
 def open_camera(index: int = CAMERA_INDEX) -> cv2.VideoCapture:
     """

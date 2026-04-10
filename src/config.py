@@ -65,7 +65,6 @@ OVERLAY_FONT_SCALE = 1.0
 OVERLAY_THICKNESS  = 2
 OVERLAY_POSITION   = (10, 30)   # (x, y) pixels from top-left
 
-# Large command text drawn in run_control.py
 COMMAND_FONT       = cv2.FONT_HERSHEY_DUPLEX
 COMMAND_FONT_SCALE = 2.0
 COMMAND_THICKNESS  = 5
