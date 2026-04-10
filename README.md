@@ -1,6 +1,10 @@
 # Gesture Car — Hand Gesture Control System
 
-A real-time dual-hand gesture detection system using a Mac webcam. The left hand controls movement via gesture classification; the right hand controls steering via wrist rotation. Commands are sent to a Raspberry Pi (GPIO) or Webots simulator (UDP). An auth flow (facial recognition + unlock gesture) guards entry before control starts.
+A real-time dual-hand gesture detection system using a Mac webcam. The left hand controls movement via gesture classification; the right hand controls steering via wrist rotation. Commands are sent to a Raspberry Pi (GPIO) or Webots simulator (UDP). (To be implemented) An auth flow (facial recognition + unlock gesture) guards entry before control starts.
+
+## Demo
+
+https://github.com/user-attachments/assets/cbe283fd-fc34-4367-b65b-56c48920eca4
 
 ---
 
